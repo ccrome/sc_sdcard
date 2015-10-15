@@ -31,13 +31,22 @@ typedef enum {
 /* Prototypes for disk control functions */
 
 int assign_drives (int, int);
-DSTATUS disk_initialize (BYTE);
+
+DSTATUS disk_initialize(BYTE IfNum);
+
 DSTATUS disk_status (BYTE);
+
 DRESULT disk_read (BYTE, BYTE[], DWORD, BYTE);
+
 #if     _READONLY == 0
+
+#ifdef _STREAM_FS
+DRESULT disk_write (BYTE, const BYTE[], DWORD, BYTE, streaming chanend c);
+#else
 DRESULT disk_write (BYTE, const BYTE[], DWORD, BYTE);
-DRESULT disk_write_streamed(BYTE IfNum, streaming chanend c,DWORD sector, BYTE count);
 #endif
+#endif
+
 DRESULT disk_ioctl (BYTE, BYTE, BYTE[]);
 
 /* Disk Status Bits (DSTATUS) */

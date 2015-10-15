@@ -24,6 +24,8 @@ BYTE Buff[512*32];      /* File read buffer (Make Smaller temporary/ at least 32
 #define min(a,b) ((a)<(b))?(a):(b)
 
 const unsigned nRuns = 512;               // Run each block test consecutively n times.  Note size limits differ in Debug mode
+const unsigned nIters = 1;                // Can't quite get to 4G size - max is 511 iters
+
 const unsigned detailedPrintWrite = 0;    // Control whether detailed results are printed or just summary
 const unsigned detailedPrintRead = 0;
 
@@ -105,7 +107,6 @@ void disk_write_read_task(streaming chanend c)
   unsigned br_sum = 0;
 
   unsigned this_b;
-  const unsigned nIters = 511;          // Can't quite get to 4G size
 
   printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!)\n", nIters, nIters*nRuns*sizeof(Buff));
   for(k=1; k<=nIters; k++) {

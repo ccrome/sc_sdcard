@@ -97,6 +97,10 @@
 
 #include "integer.h"
 
+#ifdef _STREAM_FS
+#define null (0)            // Fudge the compatibility of optional channel parameters
+#endif
+
 void die(FRESULT rc);       //todo: Stop with dying message
 
 /*--------------------------------------------------------------------------
@@ -726,19 +730,18 @@ FRESULT move_window (
 {
   DWORD wsect;
 
-
   wsect = fs->winsect;
   if (wsect != sector) {  /* Changed current window */
 #if !_FS_READONLY
     if (fs->wflag) {  /* Write back dirty window if needed */
-      if (disk_write(fs->drv, fs->win, wsect, 1) != RES_OK)
+      if (disk_write(fs->drv, fs->win, wsect, 1, null) != RES_OK)
         return FR_DISK_ERR;
       fs->wflag = 0;
       if (wsect < (fs->fatbase + fs->fsize)) {  /* In FAT area */
         BYTE nf;
         for (nf = fs->n_fats; nf > 1; nf--) {  /* Reflect the change to all FAT copies */
           wsect += fs->fsize;
-          disk_write(fs->drv, fs->win, wsect, 1);
+          disk_write(fs->drv, fs->win, wsect, 1, null);
         }
       }
     }
@@ -781,7 +784,7 @@ FRESULT sync (  /* FR_OK: successful, FR_DISK_ERR: failed */
       ST_DWORD(fs->win+FSI_Free_Count, fs->free_clust);
       ST_DWORD(fs->win+FSI_Nxt_Free, fs->last_clust);
       /* Write it into the FSInfo sector */
-      disk_write(fs->drv, fs->win, fs->fsi_sector, 1);
+      disk_write(fs->drv, fs->win, fs->fsi_sector, 1, null);
       fs->fsi_flag = 0;
     }
     /* Make sure that no pending write process in the physical drive */
@@ -2056,6 +2059,8 @@ FRESULT chk_mounted (  /* FR_OK(0): successful, !=0: any error occurred */
 
   fs->fs_type = 0;          /* Clear the file system object */
   fs->drv = LD2PD(vol);        /* Bind the logical drive and a physical drive */
+
+
   stat = disk_initialize(fs->drv);  /* Initialize low level disk I/O layer */
   if (stat & STA_NOINIT)        /* Check if the initialization succeeded */
     return FR_NOT_READY;      /* Failed to initialize due to no media or hard error */
@@ -2537,7 +2542,7 @@ FRESULT f_write (
       if (cc) {            /* Write maximum contiguous sectors directly */
         if (csect + cc > fp->fs->csize)  /* Clip at cluster boundary */
           cc = fp->fs->csize - csect;
-        if (disk_write(fp->fs->drv, (BYTE*)wbuff, sect, (BYTE)cc) != RES_OK)
+        if (disk_write(fp->fs->drv, (BYTE*)wbuff, sect, (BYTE)cc, null) != RES_OK)
           ABORT(fp->fs, FR_DISK_ERR);
 #if _FS_TINY
         if (fp->fs->winsect - sect < cc) {  /* Refill sector cache if it gets invalidated by the direct write */
@@ -2658,7 +2663,7 @@ FRESULT f_write_streamed (
         /*
          * Here's where the main file write takes place
          */
-        if (disk_write_streamed(fp->fs->drv, c, sect, (BYTE)cc) != RES_OK)
+        if (disk_write(fp->fs->drv, null, sect, (BYTE)cc, c) != RES_OK)
           ABORT(fp->fs, FR_DISK_ERR);
 #if _FS_TINY
         if (fp->fs->winsect - sect < cc) {  /* Refill sector cache if it gets invalidated by the direct write */
