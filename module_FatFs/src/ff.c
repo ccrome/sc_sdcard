@@ -2476,14 +2476,16 @@ FRESULT f_read (
 
 #if !_FS_READONLY
 /*-----------------------------------------------------------------------*/
-/* Write File                                                            */
+/* Write File - with XMOS streaming option                               */
 /*-----------------------------------------------------------------------*/
 
+
 FRESULT f_write (
-  FIL *fp,      /* Pointer to the file object */
-  const void *buff,  /* Pointer to the data to be written */
-  UINT btw,      /* Number of bytes to write */
-  UINT *bw      /* Pointer to number of bytes written */
+  FIL *fp,          /* Pointer to the file object */
+  const void *buff, /* Pointer to the data to be written */
+  UINT btw,         /* Number of bytes to write */
+  UINT *bw//,         /* Pointer to number of bytes written */
+  //streaming chanend c
 )
 {
   FRESULT res;

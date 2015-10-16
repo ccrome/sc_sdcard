@@ -173,9 +173,9 @@ unsigned WaitForTimed(in port p, unsigned bitmask, unsigned chkval, out port clk
 
 /**********************************************************************************
  * XMOS specific STREAMED version of commands
- * 
- * Memory buffer: 	Pass valid buff[], set c to null.
- * Streamed: 		Set buff[] as null, and channel c will be used to read/write data instead
+ *
+ * Memory buffer:   Pass valid buff[], set c to null.
+ * Streamed:        Set buff[] as null, and channel c will be used to read/write data instead
  **********************************************************************************/
 static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int DataBlocks, BYTE buff[], RESP Resp, streaming chanend ?c)
 
@@ -234,7 +234,7 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
     // We  read both R and Dat, we'll use one or the other below
     SDif[IfNum].Cmd :> >> R; SDif[IfNum].Dat :> >> Dat; SDif[IfNum].Clk <: 0;      //Clock back to idle
     i++;
-	
+
     switch(RespStat)
     {
       case RESP_WAITING_START_BIT:
@@ -260,11 +260,11 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
         if(0x0FFFFFFF == Dat) DatStat = DAT_RECEIVING_NIBBLE_H; // if start nibble arrived -> next state
         else if(400000 == i) return RES_ERROR; // busy timeout
         break;
-        
+
       case DAT_RECEIVING_NIBBLE_H:
         DatStat = DAT_RECEIVING_NIBBLE_L; // next state
         break;
-        
+
       case DAT_RECEIVING_NIBBLE_L:
         if(buff == NULL) {
             dead_parrot(0);                         //todo: streaming mode
@@ -275,7 +275,7 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
           while(DatByteCount & 511)
           { /* todo: doing this stuff with assembly would highly increase performance */
 
-		  /* Information from http://wiki.seabright.co.nz/wiki/SdCardProtocol.html
+          /* Information from http://wiki.seabright.co.nz/wiki/SdCardProtocol.html
                * Data is clocked into the host or card on the rising edge of CLK and changes on the falling edge.
                * This is equivalent to the SPI (0, 0) mode.
                */
@@ -286,10 +286,10 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
           j = 17; DatStat = DAT_RECEIVING_CRC; // next state
           break;
         }
-        if(DatByteCount % 512) DatStat = DAT_RECEIVING_NIBBLE_H;    // todo: use &
+        if(DatByteCount & 511) DatStat = DAT_RECEIVING_NIBBLE_H;
         else { j = 17; DatStat = DAT_RECEIVING_CRC; }
         break;
-        
+
       case DAT_RECEIVING_CRC: // ignoring crc. todo?
         //SDif.Dat :> Dat;
         if(--j) break; // discard 17 nibbles ( 8 bytes CRC + 1 nibble end data )
@@ -339,7 +339,7 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
   }
 
   ToggleClock(8, SDif[IfNum].Clk);            // Send 8 clock toggles
-  
+
 /**********************************************************************************
  * Write operation
  **********************************************************************************/
@@ -350,7 +350,7 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
       set_port_drive(SDif[IfNum].Dat);
 
       Crc0 = Crc1 = Crc2 = Crc3 = 0;
-	  /* Information from http://wiki.seabright.co.nz/wiki/SdCardProtocol.html
+      /* Information from http://wiki.seabright.co.nz/wiki/SdCardProtocol.html
        * Data is clocked into the host or card on the rising edge of CLK and changes on the falling edge.
        * This is equivalent to the SPI (0, 0) mode.
        */
@@ -358,25 +358,25 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
 
 #ifdef _STREAM_FS
       if(buff == NULL) {
-      	  // Data is coming from the streaming channel
-		  for(j = 512/4; j; j--) // send bytes of data (512/4 int)
-	      {
+          // Data is coming from the streaming channel
+          for(j = 512/4; j; j--) // send bytes of data (512/4 int)
+          {
             c :> Dat;                           // XMOS Streaming version
             Dat = byterev(bitrev(Dat));
             DatByteCount++;
-			calc_sdcard_crc(Dat, D0, D1, D2, D3, Crc0, Crc1, Crc2, Crc3);
-			send_8_nibbles;
-	      }
+            calc_sdcard_crc(Dat, D0, D1, D2, D3, Crc0, Crc1, Crc2, Crc3);
+            send_8_nibbles;
+          }
       }
       else {
-		  // Data is coming from the buff[]
-		  for(j = 512/4; j; j--) // send bytes of data (512/4 int)
-	      {
-	        Dat = byterev(bitrev((buff, int[])[DatByteCount++]));
-			calc_sdcard_crc(Dat, D0, D1, D2, D3, Crc0, Crc1, Crc2, Crc3);
-			send_8_nibbles;
-	      }
-	  }
+          // Data is coming from the buff[]
+          for(j = 512/4; j; j--) // send bytes of data (512/4 int)
+          {
+            Dat = byterev(bitrev((buff, int[])[DatByteCount++]));
+            calc_sdcard_crc(Dat, D0, D1, D2, D3, Crc0, Crc1, Crc2, Crc3);
+            send_8_nibbles;
+          }
+      }
 #else
 #error broken temporarily
 #endif
@@ -452,13 +452,13 @@ DSTATUS disk_initialize(BYTE IfNum)
   do
   {
     if(SendCmd(IfNum, 55, 0, R1, 0, DummyData, Resp, null)) return RES_ERROR;
-	
+
     if(SendCmd(IfNum, 41, BlockLen, R3, 0, DummyData, Resp, null)) return RES_ERROR;  // ACMD41
-	
+
     if(i++ == 1000) return RES_ERROR; // busy timeout
   }
   while((Resp[1] & 1) == 0); // repeat while busy
-  
+
   SDif[IfNum].Ccs = ((Resp[1] & 2)) ? 1 : 0;
   if(SendCmd(IfNum, 2, 0, R2, 0, DummyData, Resp, null)) return RES_ERROR; // get CID
   if(SendCmd(IfNum, 3, 0, R6, 0, DummyData, Resp, null)) return RES_ERROR; // get RCA

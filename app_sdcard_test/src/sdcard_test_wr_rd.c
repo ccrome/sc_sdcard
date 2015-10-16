@@ -19,7 +19,7 @@
 
 FATFS Fatfs;            /* File system object */
 FIL Fil;                /* File object */
-BYTE Buff[512*32];      /* File read buffer (Make Smaller temporary/ at least 32 SD card blocks to let multiblock operations (if file not fragmented) */
+BYTE Buff[512*4];      /* File read buffer (Make Smaller temporary/ at least 32 SD card blocks to let multiblock operations (if file not fragmented) */
 #define max(a,b) ((a)>(b))?(a):(b)
 #define min(a,b) ((a)<(b))?(a):(b)
 
@@ -36,8 +36,9 @@ void die(FRESULT rc ) /* Stop with dying message */
 }
 
 // Readback testing functions
-unsigned walk_the_crc(void);
-void init_the_crc(void);
+void init_the_crc(unsigned *p);
+void walk_the_crc(unsigned *p);
+
 // Implemented in xs1.h
 void crc32(unsigned *checksum, unsigned data, unsigned poly);
 // Generate predictable pseudo-random traffic (that we can compare against for proof of testing)
@@ -53,15 +54,13 @@ void disk_write_read_task(streaming chanend c)
 
   // Stats collection
   UINT read_time[nRuns], write_time[nRuns];
-  UINT bw[nRuns], br[nRuns], i, T, k;
+  UINT bw[nRuns], br[nRuns], i, T, k, write_size;
 
 #ifdef BUS_MODE_4BIT
   printf("Starting with BUS_MODE_4BIT\n");
 #else
   printf("Starting with SPI 1 bit mode\n");
 #endif
-
-  //for( i = 0; i < sizeof(Buff); i++) Buff[i] = i + i / 512; // fill the buffer with some data
 
   f_mount(0, &Fatfs);             /* Register volume work area (never fails) for SD host interface #0 */
   {
@@ -81,6 +80,8 @@ void disk_write_read_task(streaming chanend c)
     printf("%lu KB total drive space.\n"
            "%lu KB available.\n",
            fre_sect / 2, tot_sect / 2);
+
+    write_size = fs->csize *512;
   }
 
   /****************************/
@@ -108,11 +109,11 @@ void disk_write_read_task(streaming chanend c)
 
   unsigned this_b;
 
-  printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!)\n", nIters, nIters*nRuns*sizeof(Buff));
+  printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!)\n", nIters, nIters*nRuns*write_size);
   for(k=1; k<=nIters; k++) {
       for(i=0; i<nRuns; i++) {
         T = get_time();
-        rc = f_write_streamed(&Fil, c, sizeof(Buff), &bw[i]);     // Streamed I/O, not buffered
+        rc = f_write_streamed(&Fil, c, write_size, &bw[i]);     // Streamed I/O, not buffered
         write_time[i] = get_time() - T;
         if(rc) die(rc);
       }
@@ -126,12 +127,12 @@ void disk_write_read_task(streaming chanend c)
           bw_sum += this_b;
 
           // Check size of each transaction
-          if(bw[i]!=sizeof(Buff)){
+          if(bw[i]!=write_size){
               printf("Run %d: error - %8u bytes written\n", i, bw[i]);
               die(0);
           }
       }
-      printf("Iter %04d: %d blocks of size %d bytes: Write rate min: %u, max: %u, avg: %u Kbytes/sec\n", k, i, sizeof(Buff), bw_min, bw_max, bw_sum/i);
+      printf("Iter %04d: %d blocks of size %d bytes: Write rate min: %u, max: %u, avg: %u Kbytes/sec\n", k, i, write_size, bw_min, bw_max, bw_sum/i);
 
       // Dump out detailed results
       if(detailedPrintWrite) {
@@ -154,10 +155,12 @@ void disk_write_read_task(streaming chanend c)
   printf("done.\n");
 
   int j;
-  printf("\nReading file content...");
-  init_the_crc();                           // Checking code
+  unsigned p;
+  printf("\nReading file content...\n");
+  init_the_crc(&p);                         // Checking code
 
-  for(k=1; k<=nIters; k++) {
+  k=1;
+  while(!f_eof(&Fil)) {
       for(i=0; i<nRuns; i++) {
         memset(Buff, 0, sizeof(Buff));
         T = get_time();
@@ -172,13 +175,13 @@ void disk_write_read_task(streaming chanend c)
             //if(j%8 ==0) printf("\n%08x: ", j);
             //printf("%08x ", l[j]);
 
-            if(lBuff[j] != walk_the_crc() ) {
+            if(lBuff[j] != p ) {
                 printf("\nError on run %d, file offset %08x = %08x\n", i, j*4, lBuff[j]);
                 die(0);
             }
+            walk_the_crc(&p);
         }
       }
-      printf("done.\n");
 
       // Print separately from the actual timing loop, to avoid printf slowing down and affecting results
        br_sum = 0;
@@ -195,7 +198,7 @@ void disk_write_read_task(streaming chanend c)
                die(0);
            }
        }
-       printf("Iter %04d: File has %d blocks of size %d bytes: Read rate min: %u, max: %u, avg: %u Kbytes/sec\n", k, i, sizeof(Buff), br_min, br_max, br_sum/i);
+       printf("Iter %04d: %d blocks of size %d bytes: Read rate min: %u, max: %u, avg: %u Kbytes/sec\n", k, i, sizeof(Buff), br_min, br_max, br_sum/i);
 
        // Dump out detailed results (read)
        if(detailedPrintRead) {
@@ -203,6 +206,7 @@ void disk_write_read_task(streaming chanend c)
            printf("Run %4d: %u bytes read. Read rate: %u KBytes/Sec\n", i, br[i], (br[i]*100000)/read_time[i]);
         }
        }
+       k++;
   }
 
   printf("\nClosing the file...");
