@@ -25,8 +25,8 @@ BYTE Buff[512*32];      /* File read buffer (Make Smaller temporary/ at least 32
 #define max(a,b) ((a)>(b))?(a):(b)
 #define min(a,b) ((a)<(b))?(a):(b)
 
-const unsigned nRuns = 512;               // Run each block test consecutively n times.  Note size limits differ in Debug mode
-const unsigned targetFileSize = 16*1024*1024; //    4096UL*1024*1024*1024-32768;   // Can't quite get to 4G size
+unsigned nRuns = 512;                         // Run each block test consecutively n times.  Note size limits differ in Debug mode
+const unsigned targetFileSize = 64*1024*1024;  //    4096UL*1024*1024*1024-32768;   // Can't quite get to 4G size
 
 const unsigned detailedPrintWrite = 0;    // Control whether detailed results are printed or just summary
 const unsigned detailedPrintRead = 0;
@@ -47,6 +47,17 @@ void crc32(unsigned *checksum, unsigned data, unsigned poly);
 #define CRC32_ETH_REV_POLY 0xEDB88320       // x^32 + x^26 + x^23 + x^22 + x^16 + x^12 + x^11 + x^10 + x^8 + x^7 + x^5 + x^4 + x^2 + x^1 + x^0
                                             // See https://github.com/xcore/doc_tips_and_tricks/blob/master/doc/crc.rst
 
+DWORD allocate_contiguous_clusters (    /* Returns the first sector in LBA (0:error or not contiguous) */
+    FIL* fp,    /* Pointer to the open file object */
+    DWORD len   /* Number of bytes to allocate */
+);
+
+DRESULT disk_write_streamed(BYTE IfNum, streaming chanend c, DWORD sector, UINT count);
+
+extern unsigned SendCmd_twr_max, SendCmd_twr_min;
+
+
+/*****************************************************************************************/
 
 void disk_write_read_task(streaming chanend c)
 {
@@ -114,25 +125,28 @@ void disk_write_read_task(streaming chanend c)
   unsigned this_b;
   unsigned nIters = targetFileSize/(nRuns*write_size);
 
-  printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!)\n\n", nIters, nIters*nRuns*write_size);
-  init_the_crc(&p);                         // Checking code
-  for(k=1; k<=nIters; k++) {
-      for(i=0; i<nRuns; i++) {
-        // Fill the buffer with unique CRC-generated values
-        // Check the read back contents of the buffer
-        unsigned *lBuff;
-        lBuff = (unsigned *)&Buff;               // Cast the pointer so we read & check unsigned 32-bit values
-        for(j=0; j<sizeof(Buff)/sizeof(signed); j++) {
-            //if(j%8 ==0) printf("\n%08x: ", j);
-            //printf("%08x ", l[j]);
+  unsigned streamWriteTest = 1;             // Buffered write mode
 
-            lBuff[j] = p;
-            walk_the_crc(&p);
-        }
-        T = get_time();
-        rc = f_write(&Fil, Buff, write_size, &bw[i]);     // use buffered I/O for now
-        write_time[i] = get_time() - T;
-        if(rc) die(rc);
+  if(!streamWriteTest) {
+      printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!) streamWriteTest=%d\n\n", nIters, nIters*nRuns*write_size,streamWriteTest);
+      init_the_crc(&p);                         // Note: not used if using stream writes - harmless
+      for(k=1; k<=nIters; k++) {
+          for(i=0; i<nRuns; i++) {            // Fill the buffer with unique CRC-generated values
+            // Check the read back contents of the buffer
+            unsigned *lBuff;
+            lBuff = (unsigned *)&Buff;               // Cast the pointer so we read & check unsigned 32-bit values
+            for(j=0; j<sizeof(Buff)/sizeof(signed); j++) {
+                //if(j%8 ==0) printf("\n%08x: ", j);
+                //printf("%08x ", l[j]);
+
+                lBuff[j] = p;
+                walk_the_crc(&p);
+            }
+            T = get_time();
+            rc = f_write(&Fil, Buff, write_size, &bw[i]);     // use buffered I/O for now
+            write_time[i] = get_time() - T;
+            if(rc) die(rc);
+            }
       }
       // Print separately from the actual timing loop, to avoid printf slowing down and affecting results
       bw_sum = 0;
@@ -158,6 +172,27 @@ void disk_write_read_task(streaming chanend c)
         }
       }
   }
+  else {
+      // XMOS Streamed I/O and direct disk write
+      // Pre-allocate clusters to the file
+      printf("Streaming directly to the file... expected file size %u bytes (0 means 4G!) streamWriteTest=%d\n\n", targetFileSize, streamWriteTest);
+      T = get_time();
+      DWORD org = allocate_contiguous_clusters(&Fil, targetFileSize);
+      unsigned alloc_time = get_time()-T;
+      printf("Allocation took %u ms\n", alloc_time/100000);
+
+      if (!org) {
+          printf("Error: allocate_contiguous_clusters() failed.\n");
+          f_close(&Fil);
+          die(0);
+      }
+      else {
+          // Note: Can't time this for longer than ~40 seconds using Xmos timers.  Measure inside SendCmd instead.
+          rc = disk_write_streamed(Fil.fs->drv, c, org, targetFileSize/512);
+          if(rc) die(rc);
+          printf("SendCmd took max %d usec, min %d usec\n", SendCmd_twr_max/100, SendCmd_twr_min/100);
+      }
+  }
 
   printf("\nClosing the file...");
   rc = f_close(&Fil);
@@ -173,9 +208,11 @@ void disk_write_read_task(streaming chanend c)
 
   printf("\nReading file content...\n");
   init_the_crc(&p);                         // Checking code
-  k=1;
+  k=0;
+
+  printf("Checking CRC contents:\n");
+
   while(!f_eof(&Fil)) {
-      for(i=0; i<nRuns; i++) {
         memset(Buff, 0, sizeof(Buff));
         T = get_time();
         rc = f_read(&Fil, Buff, sizeof(Buff), &br[i]);
@@ -190,37 +227,14 @@ void disk_write_read_task(streaming chanend c)
             //printf("%08x ", l[j]);
 
             if(lBuff[j] != p ) {
-                printf("\nError on run %d, file offset %08x = %08x\n", i, j*4, lBuff[j]);
+                printf("\nFile content difference found, file offset %08x = %08x\n", 0, lBuff[j]);
                 die(0);
             }
             walk_the_crc(&p);
         }
-      }
-
-      // Print separately from the actual timing loop, to avoid printf slowing down and affecting results
-       br_sum = 0;
-       for(i=0; i<nRuns; i++) {
-           this_b = (br[i]*100000)/read_time[i];
-           // Collect stats
-           br_min = min(br_min, this_b);
-           br_max = max(br_max, this_b);
-           br_sum += this_b;
-
-           // Check size of each transaction
-           if(br[i]!=sizeof(Buff)){
-               printf("Run %d: error - %8u bytes read\n", i, br[i]);
-               die(0);
-           }
-       }
-       printf("Iter %04d: %d blocks of size %d bytes: Read rate min: %u, max: %u, avg: %u Kbytes/sec\n", k, i, sizeof(Buff), br_min, br_max, br_sum/i);
-
-       // Dump out detailed results (read)
-       if(detailedPrintRead) {
-        for(i=0; i<nRuns; i++) {
-           printf("Run %4d: %u bytes read. Read rate: %u KBytes/Sec\n", i, br[i], (br[i]*100000)/read_time[i]);
-        }
-       }
-       k++;
+        if(!(k%128)) printf("\n");
+        printf(".");                    // Progress marker
+        k++;
   }
 
   printf("\nClosing the file...");

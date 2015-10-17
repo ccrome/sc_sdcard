@@ -14,6 +14,13 @@ void dead_parrot(int rc)            /* Stop with dying message */
         ;
 }
 
+
+// Instrumentation:  Measure max/min response times
+unsigned SendCmd_twr_max = 0;
+unsigned SendCmd_twr_min = 9999999;
+#define max(a,b) ((a)>(b))?(a):(b)
+#define min(a,b) ((a)<(b))?(a):(b)
+
 typedef struct SDHostInterface
 {
   out port Clk; // a 1 bit port
@@ -347,6 +354,7 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
   {
     do
     {
+      unsigned T = get_time();              // Instrument times taken to write
       set_port_drive(SDif[IfNum].Dat);
 
       Crc0 = Crc1 = Crc2 = Crc3 = 0;
@@ -378,7 +386,15 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
           }
       }
 #else
-#error broken temporarily
+      // Normal behaviour
+      // Data is coming from the buff[]
+      for(j = 512/4; j; j--) // send bytes of data (512/4 int)
+      {
+        Dat = byterev(bitrev((buff, int[])[DatByteCount++]));
+        calc_sdcard_crc(Dat, D0, D1, D2, D3, Crc0, Crc1, Crc2, Crc3);
+        send_8_nibbles;
+      }
+  }
 #endif
 
       // write CRCs, end nibble and wait busy
@@ -404,6 +420,10 @@ static DRESULT SendCmd(BYTE IfNum, BYTE Cmd, DWORD Arg, RESP_TYPE RespType, int 
       // Wait for Dat bit 3 to go high
       Dat = WaitForTimed(SDif[IfNum].Dat, 0x8, 0x8, SDif[IfNum].Clk);
       if(!(Dat &0x08)) return RES_ERROR;
+
+      unsigned this_t = get_time()-T;            // Instrument times taken to write
+      SendCmd_twr_max = max(SendCmd_twr_min, this_t);
+      SendCmd_twr_min = min(SendCmd_twr_min, this_t);
     }
     while(++DataBlocks);
   }
@@ -526,10 +546,10 @@ DRESULT disk_write(BYTE IfNum, const BYTE buff[], DWORD sector, UINT count)
 }
 
 #ifdef     _STREAM_FS
+
 /*-----------------------------------------------------------------------*/
 /* Write File - from an XMOS Streaming Channel                           */
 /*-----------------------------------------------------------------------*/
-
 DRESULT disk_write_streamed(BYTE IfNum, streaming chanend c, DWORD sector, UINT count)
 {
   RESP Resp;
@@ -585,6 +605,7 @@ DRESULT disk_ioctl (BYTE IfNum, BYTE ctrl, BYTE RetVal[])
 
 #endif //BUS_MODE_4BIT
 
+#ifndef _FS_NORTC
 // User Provided Timer Function for FatFs module
 DWORD get_fattime(void)
 {
@@ -595,3 +616,4 @@ DWORD get_fattime(void)
           | ((DWORD)0 << 5)
           | ((DWORD)0 >> 1);
 }
+#endif
