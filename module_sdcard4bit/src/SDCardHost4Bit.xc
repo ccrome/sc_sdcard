@@ -490,7 +490,7 @@ DSTATUS disk_initialize(BYTE IfNum)
 
 //todo: streaming version of this
 #pragma unsafe arrays
-DRESULT disk_read(BYTE IfNum, BYTE buff[], DWORD sector, BYTE count)
+DRESULT disk_read(BYTE IfNum, BYTE buff[], DWORD sector, UINT count)
 {
   RESP Resp;
   unsigned char DummyData[1];
@@ -508,7 +508,7 @@ DRESULT disk_read(BYTE IfNum, BYTE buff[], DWORD sector, BYTE count)
 }
 
 #pragma unsafe arrays
-DRESULT disk_write(BYTE IfNum, const BYTE buff[],DWORD sector, BYTE count, streaming chanend c)
+DRESULT disk_write(BYTE IfNum, const BYTE buff[], DWORD sector, UINT count)
 {
   RESP Resp;
   unsigned char DummyData[1];
@@ -517,15 +517,36 @@ DRESULT disk_write(BYTE IfNum, const BYTE buff[],DWORD sector, BYTE count, strea
   if(1 < count)
   { // multiblock write
     //if(SendCmd(SDif, 23, NumBlocks, R1, 0, DummyData, Resp)) return 0; // set foreseen multiple block read. Remarked because only optionally supported by cards
-    if(SendCmd(IfNum, 25, SDif[IfNum].Ccs ? sector : 512 * sector, R1, -count, (buff, BYTE[]), Resp, c)) return RES_ERROR; // multiblock write
-    if(SendCmd(IfNum, 12, 0, R1B, 0, DummyData, Resp, c)) return RES_ERROR; // stop multi-block write. (using stop command instead of cmd23)
+    if(SendCmd(IfNum, 25, SDif[IfNum].Ccs ? sector : 512 * sector, R1, -count, (buff, BYTE[]), Resp, null)) return RES_ERROR; // multiblock write
+    if(SendCmd(IfNum, 12, 0, R1B, 0, DummyData, Resp, null)) return RES_ERROR; // stop multi-block write. (using stop command instead of cmd23)
   }
   else
-    if(SendCmd(IfNum, 24, SDif[IfNum].Ccs ? sector : 512 * sector, R1, -1, (buff, BYTE[]), Resp, c)) return RES_ERROR; // single block write
+    if(SendCmd(IfNum, 24, SDif[IfNum].Ccs ? sector : 512 * sector, R1, -1, (buff, BYTE[]), Resp, null)) return RES_ERROR; // single block write
   return RES_OK;
 }
 
+#ifdef     _STREAM_FS
+/*-----------------------------------------------------------------------*/
+/* Write File - from an XMOS Streaming Channel                           */
+/*-----------------------------------------------------------------------*/
 
+DRESULT disk_write_streamed(BYTE IfNum, streaming chanend c, DWORD sector, UINT count)
+{
+  RESP Resp;
+  unsigned char DummyData[1];
+
+  if(IfNum >= sizeof(SDif)/sizeof(SDHostInterface)) return RES_PARERR;
+  if(1 < count)
+  { // multiblock write
+    //if(SendCmd(SDif, 23, NumBlocks, R1, 0, DummyData, Resp)) return 0; // set foreseen multiple block read. Remarked because only optionally supported by cards
+    if(SendCmd(IfNum, 25, SDif[IfNum].Ccs ? sector : 512 * sector, R1, -count, (BYTE *)NULL, Resp, c)) return RES_ERROR; // multiblock write
+    if(SendCmd(IfNum, 12, 0, R1B, 0, DummyData, Resp, c)) return RES_ERROR; // stop multi-block write. (using stop command instead of cmd23)
+  }
+  else
+    if(SendCmd(IfNum, 24, SDif[IfNum].Ccs ? sector : 512 * sector, R1, -1, (BYTE *)NULL, Resp, c)) return RES_ERROR; // single block write
+  return RES_OK;
+}
+#endif
 /**********************************************************************************/
 
 DSTATUS disk_status(BYTE IfNum)

@@ -10,21 +10,23 @@
  ============================================================================
  */
 
+#include <xccompat.h>       // Enable XMOS streaming channel types to pass through.  Need this before other header files
+#define streaming
+
 #include <stdio.h> /* for the printf function */
 #include "ff.h"    /* file system routines */
 #include "timing.h"
 #include "diskio.h"     /* To get the bus mode definition for debugging */
 #include "string.h"     /* To get memset function */
 
-
 FATFS Fatfs;            /* File system object */
 FIL Fil;                /* File object */
-BYTE Buff[512*4];      /* File read buffer (Make Smaller temporary/ at least 32 SD card blocks to let multiblock operations (if file not fragmented) */
+BYTE Buff[512*32];      /* File read buffer (Make Smaller temporary/ at least 32 SD card blocks to let multiblock operations (if file not fragmented) */
 #define max(a,b) ((a)>(b))?(a):(b)
 #define min(a,b) ((a)<(b))?(a):(b)
 
 const unsigned nRuns = 512;               // Run each block test consecutively n times.  Note size limits differ in Debug mode
-const unsigned targetFileSize = 4095*1024*1024*1024-1;   // Can't quite get to 4G size
+const unsigned targetFileSize = 16*1024*1024; //    4096UL*1024*1024*1024-32768;   // Can't quite get to 4G size
 
 const unsigned detailedPrintWrite = 0;    // Control whether detailed results are printed or just summary
 const unsigned detailedPrintRead = 0;
@@ -54,7 +56,8 @@ void disk_write_read_task(streaming chanend c)
 
   // Stats collection
   UINT read_time[nRuns], write_time[nRuns];
-  UINT bw[nRuns], br[nRuns], i, T, k, write_size;
+  UINT bw[nRuns], br[nRuns], i, T, j, k, write_size;
+  unsigned p;                   // CRC generator var
 
 #ifdef BUS_MODE_4BIT
   printf("Starting with BUS_MODE_4BIT\n");
@@ -62,7 +65,8 @@ void disk_write_read_task(streaming chanend c)
   printf("Starting with SPI 1 bit mode\n");
 #endif
 
-  f_mount(0, &Fatfs);             /* Register volume work area (never fails) for SD host interface #0 */
+  f_mount(&Fatfs, "", 1);            // Register volume work area (never fails) for SD host interface #0
+                                // Note the params have changed between fatFS 0.09 and 0.11
   {
     FATFS *fs;
     DWORD fre_clust, fre_sect, tot_sect;
@@ -81,7 +85,7 @@ void disk_write_read_task(streaming chanend c)
            "%lu KB available.\n",
            fre_sect / 2, tot_sect / 2);
 
-    write_size = fs->csize *512;
+    write_size = sizeof(Buff); // Back to buffered for now fs->csize *512;
   }
 
   /****************************/
@@ -110,11 +114,23 @@ void disk_write_read_task(streaming chanend c)
   unsigned this_b;
   unsigned nIters = targetFileSize/(nRuns*write_size);
 
-  printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!)\n", nIters, nIters*nRuns*write_size);
+  printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!)\n\n", nIters, nIters*nRuns*write_size);
+  init_the_crc(&p);                         // Checking code
   for(k=1; k<=nIters; k++) {
       for(i=0; i<nRuns; i++) {
+        // Fill the buffer with unique CRC-generated values
+        // Check the read back contents of the buffer
+        unsigned *lBuff;
+        lBuff = (unsigned *)&Buff;               // Cast the pointer so we read & check unsigned 32-bit values
+        for(j=0; j<sizeof(Buff)/sizeof(signed); j++) {
+            //if(j%8 ==0) printf("\n%08x: ", j);
+            //printf("%08x ", l[j]);
+
+            lBuff[j] = p;
+            walk_the_crc(&p);
+        }
         T = get_time();
-        rc = f_write_streamed(&Fil, c, write_size, &bw[i]);     // Streamed I/O, not buffered
+        rc = f_write(&Fil, Buff, write_size, &bw[i]);     // use buffered I/O for now
         write_time[i] = get_time() - T;
         if(rc) die(rc);
       }
@@ -155,11 +171,8 @@ void disk_write_read_task(streaming chanend c)
   if(rc) die(rc);
   printf("done.\n");
 
-  int j;
-  unsigned p;
   printf("\nReading file content...\n");
   init_the_crc(&p);                         // Checking code
-
   k=1;
   while(!f_eof(&Fil)) {
       for(i=0; i<nRuns; i++) {
