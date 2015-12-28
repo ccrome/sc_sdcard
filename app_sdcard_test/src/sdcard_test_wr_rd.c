@@ -125,7 +125,7 @@ void disk_write_read_task(streaming chanend c)
   unsigned this_b;
   unsigned nIters = targetFileSize/(nRuns*write_size);
 
-  unsigned streamWriteTest = 1;             // Buffered write mode
+  unsigned streamWriteTest = 0;             // Buffered write mode
 
   if(!streamWriteTest) {
       printf("\nWriting data to the file... %d times over .. expected file size %u bytes (0 means 4G!) streamWriteTest=%d\n\n", nIters, nIters*nRuns*write_size,streamWriteTest);
