@@ -1,3 +1,4 @@
+#include <platform.h>
 #include "diskio.h"
 #ifdef BUS_MODE_4BIT
 #include <xs1.h>
@@ -30,8 +31,7 @@ typedef struct SDHostInterface
 
 static SDHostInterface SDif[] = // LIST HERE THE PORTS USED FOR THE INTERFACES
 //       CLK,         CMD,     DAT3..0,
-{XS1_PORT_1M, XS1_PORT_1N, XS1_PORT_4E, 0, 0, 0}; // ports used for interface #0
-//{XS1_PORT_1O, XS1_PORT_1P, XS1_PORT_4F, 0, 0, 0}; // ports used for interface #1
+{PORT_SD_CLK, PORT_SD_CMD, PORT_SD_DATA, 0, 0, 0}; // ports used for interface #0
 
 /***************************/
 
